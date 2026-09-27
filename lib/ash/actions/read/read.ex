@@ -1538,7 +1538,8 @@ defmodule Ash.Actions.Read do
     |> Enum.at(0)
   end
 
-  defp agg_refs(query, calculations_in_query) do
+  @doc false
+  def agg_refs(query, calculations_in_query) do
     sort_expressions =
       query.sort
       |> List.wrap()
@@ -5095,11 +5096,12 @@ defmodule Ash.Actions.Read do
     end
   end
 
-  defp filter_with_related(
-         query,
-         authorize?,
-         path_filters
-       ) do
+  @doc false
+  def filter_with_related(
+        query,
+        authorize?,
+        path_filters
+      ) do
     if authorize? do
       do_filter_with_related(query.resource, query.filter, path_filters, [])
     else

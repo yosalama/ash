@@ -82,8 +82,11 @@ defmodule Ash.Actions.Aggregate do
             Ash.Tracer.set_metadata(opts[:tracer], :action, metadata)
 
             with {:ok, query} <- Ash.Actions.Read.handle_multitenancy(query),
+                 pre_authorization_query <- query,
                  {:ok, %{valid?: true} = query} <-
                    authorize_query(query, opts, agg_authorize?),
+                 {:ok, query} <-
+                   authorize_filter(query, pre_authorization_query, opts, agg_authorize?),
                  {:ok, aggregates} <- validate_aggregates(query, aggregates, opts),
                  {:ok, aggregates} <-
                    authorize_aggregate_fields(
@@ -155,6 +158,65 @@ defmodule Ash.Actions.Aggregate do
         end
     end)
   end
+
+  # Authorize the filter as a read does, so that an aggregate only counts
+  # records that the same read would return.
+  defp authorize_filter(query, pre_authorization_query, opts, true) do
+    parent_stack = Ash.Actions.Read.parent_stack_from_context(query.context)
+
+    expand = fn filter ->
+      Ash.Actions.Read.add_calc_context_to_filter(
+        filter,
+        opts[:actor],
+        true,
+        query.tenant,
+        opts[:tracer],
+        query.domain,
+        query.resource,
+        expand?: true,
+        parent_stack: parent_stack,
+        source_context: query.context
+      )
+    end
+
+    with {:ok, path_filters} <-
+           Ash.Filter.relationship_filters(
+             query.domain,
+             pre_authorization_query,
+             opts[:actor],
+             query.tenant,
+             Ash.Actions.Read.agg_refs(query, [{nil, expand.(query.filter)}]),
+             true
+           ),
+         {:ok, filter} <- Ash.Actions.Read.filter_with_related(query, true, path_filters),
+         {:ok, filter} <-
+           Ash.Filter.run_other_data_layer_filters(
+             query.domain,
+             query.resource,
+             filter,
+             query.tenant
+           ) do
+      filter =
+        filter
+        |> expand.()
+        |> Ash.Actions.Read.update_aggregate_filters(
+          query.resource,
+          true,
+          path_filters,
+          opts[:actor],
+          query.tenant,
+          opts[:tracer],
+          query.domain,
+          parent_stack,
+          query.context
+        )
+
+      {:ok, %{query | filter: filter}}
+    end
+  end
+
+  defp authorize_filter(query, _pre_authorization_query, _opts, _agg_authorize?),
+    do: {:ok, query}
 
   defp authorize_aggregate_fields(_query, aggregates, _opts, false), do: {:ok, aggregates}
 
