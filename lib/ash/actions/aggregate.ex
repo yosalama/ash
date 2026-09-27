@@ -82,8 +82,16 @@ defmodule Ash.Actions.Aggregate do
             Ash.Tracer.set_metadata(opts[:tracer], :action, metadata)
 
             with {:ok, query} <- Ash.Actions.Read.handle_multitenancy(query),
+                 pre_authorization_query <- query,
                  {:ok, %{valid?: true} = query} <-
                    authorize_query(query, opts, agg_authorize?),
+                 {:ok, query} <-
+                   apply_relationship_path_filters(
+                     query,
+                     pre_authorization_query,
+                     opts,
+                     agg_authorize?
+                   ),
                  {:ok, aggregates} <- validate_aggregates(query, aggregates, opts),
                  {:ok, aggregates} <-
                    authorize_aggregate_fields(
@@ -155,6 +163,23 @@ defmodule Ash.Actions.Aggregate do
         end
     end)
   end
+
+  # Authorize the filter and sort as a read does, so that an aggregate only
+  # uses records that the same read would return.
+  defp apply_relationship_path_filters(query, pre_authorization_query, opts, true) do
+    with {:ok, query, _calculations, _relationship_path_filters} <-
+           Ash.Actions.Read.apply_relationship_path_filters(
+             query,
+             pre_authorization_query,
+             [],
+             opts
+           ) do
+      {:ok, query}
+    end
+  end
+
+  defp apply_relationship_path_filters(query, _pre_authorization_query, _opts, _agg_authorize?),
+    do: {:ok, query}
 
   defp authorize_aggregate_fields(_query, aggregates, _opts, false), do: {:ok, aggregates}
 
