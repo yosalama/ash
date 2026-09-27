@@ -135,6 +135,24 @@ defmodule Ash.Test.Policy.ComplexTest do
              |> Ash.read!(actor: me)
   end
 
+  test "it properly scopes filters in count, exists and aggregates", %{me: me} do
+    # My post has three comments, and I can read two of them.
+    for filter <- [
+          [comments: [text: "comment by a friend of a friend on my post"]],
+          [count_of_comments: 3],
+          [count_of_comments_calc: 3]
+        ] do
+      query = Ash.Query.filter_input(Post, filter)
+
+      assert [] = Ash.read!(query, actor: me)
+      assert 0 == Ash.count!(query, actor: me)
+      refute Ash.exists?(query, actor: me)
+      assert nil == Ash.max!(query, :text, actor: me)
+    end
+
+    assert 1 == Ash.count!(Ash.Query.filter_input(Post, count_of_comments: 2), actor: me)
+  end
+
   test "it properly scopes single loads", %{me: me} do
     assert [%{best_friend: %{name: "me"}}] =
              User
